@@ -1,0 +1,218 @@
+using CSV, DataFrames,Flux,Plots,Random,Distributions
+real_money = DataFrame(CSV.File("/Users/fengkaiqi/Desktop/Julia/hw2-fkq-real_or_fake_money/Data/real-money-traindata.csv",normalizenames=true))#533*5
+fack_money =DataFrame(CSV.File("/Users/fengkaiqi/Desktop/Julia/hw2-fkq-real_or_fake_money/Data/notgood-traindata.csv",normalizenames=true))#427*5
+x_real_money = [ [row."V1", row."V2",row."V3",row."V4"] for row in eachrow(real_money) ]#533
+x_fake_money = [ [row."V1", row."V2",row."V3",row."V4"] for row in eachrow(fack_money) ]#427
+xs = vcat(x_real_money,x_fake_money)
+using Flux:onehot
+ys = vcat( fill(onehot(0,0:1), size(x_real_money)),
+           fill(onehot(1,0:1), size(x_fake_money)))
+
+real_money_test = DataFrame(CSV.File("/Users/fengkaiqi/Desktop/Julia/hw2-fkq-real_or_fake_money/Data/real-money-testdata.csv",normalizenames=true))
+fack_money_test =DataFrame(CSV.File("/Users/fengkaiqi/Desktop/Julia/hw2-fkq-real_or_fake_money/Data/notgood-testdata.csv",normalizenames=true))
+x_real_money_test = [ [row."V1", row."V2",row."V3",row."V4"] for row in eachrow(real_money_test) ]#229
+x_fake_money_test = [ [row."V1", row."V2",row."V3",row."V4"] for row in eachrow(fack_money_test) ]#183
+xss = vcat(x_real_money_test,x_fake_money_test)
+using Flux:onehot
+yss = vcat( fill(onehot(0,0:1), size(x_real_money_test)),
+           fill(onehot(1,0:1), size(x_fake_money_test)))
+testbatch = (Flux.batch(xss), Flux.batch(yss))
+
+using Flux
+#layer1 = Dense(4,8,σ)
+#layer2 = Dense(8,2,identity)
+using Statistics
+using Printf
+
+Actual = [fill(0,size(x_real_money)); fill(1,size(x_fake_money))]
+#prediction(i) = findmax(model(Flux.batch(xs[i])))[2] - 1
+function Confusion_Martix!(model)
+    TP,FP,TN,FN = 0,0,0,0
+    for i in 1:960
+        predict_value = findmax(model(Flux.batch(xs[i])))[2] - 1
+        if predict_value == 0 && Actual[i] ==  0
+            TP += 1
+        end
+        if predict_value == 0 && Actual[i] ==  1
+            FP += 1
+        end
+        if predict_value == 1 && Actual[i] ==  1
+            TN += 1
+        end
+        if predict_value == 1 && Actual[i] ==  0
+            FN += 1
+        end
+    end
+    print([TP FN
+            FP TN])
+end
+
+#model = Chain(Dense(4,8,σ),Dense(8,16,relu),Dense(16,32,relu),Dense(32,64,relu),Dense(64,2,identity),softmax)
+#model(Flux.batch(xs[1]))
+
+#define a deep nerual network,
+#the first layer is input layer and 2-4 layer is hidden layers, the last layer is output layer.
+function getmodel()
+    model = Chain(Dense(4,8,relu),
+        Dense(8,16,relu),
+        Dense(16,32,relu),
+        Dense(32,64,relu),
+        Dense(64,2,identity),softmax)
+end
+function population(size)
+    list = []
+    for i in 1:size
+        rand_model = getmodel()
+        append!(list,[rand_model])
+    end
+    return list
+end
+function accuracy_each_model(rand_model)
+    Actual = [fill(0,size(x_real_money)); fill(1,size(x_fake_money))]
+    prediction(i) = findmax(rand_model(xs[i]))[2] - 1
+    TP,FP,TN,FN = 0,0,0,0
+    for i in 1:960
+        predict_value = prediction(i)
+        if predict_value == 0 && Actual[i] ==  0
+            TP += 1
+        end
+        if predict_value == 0 && Actual[i] ==  1
+            FP += 1
+        end
+        if predict_value == 1 && Actual[i] ==  1
+            TN += 1
+        end
+        if predict_value == 1 && Actual[i] ==  0
+            FN += 1
+        end
+    end
+    accuracy = (TN + TP) / (TP+TN+FN+FP)
+    return accuracy
+end
+
+function model_list_accuracy()
+    model_list = population(100)
+    dict = Dict()
+    acc = []
+    for model in model_list
+        key = accuracy_each_model(model)
+        append!(acc,key)
+        value = model
+        push!(dict,key =>value)
+    end
+    x = sort(acc,rev = true)
+    final_list = zeros(60)
+    for i in 1:60
+        final_list[i] = x[i]
+    end
+    model1_list = []
+    for i in 1:60
+        append!(model1_list,dict[x[i]])
+    end
+    father = dict[final_list[1]]
+    mother = dict[final_list[2]]
+    return father, mother,final_list,model1_list
+end
+
+
+layer = 5
+Crossover_rate= 0.05
+#Do Crossover here
+function crossover(father,mother)
+    nn=deepcopy(father)
+    for i in 1:layer
+        select_one_layer = shuffle(collect(1:layer))[1]
+        mother_bias=mother[select_one_layer].bias
+        picked_one_row=shuffle(collect(1:size(mother_bias)[1]))[1]
+        if rand() < Crossover_rate
+            nn[select_one_layer].bias[picked_one_row]=mother_bias[picked_one_row]
+        end
+    end
+
+    for i in 1:layer
+        select_one_layer=shuffle(collect(1:layer))[1]
+        mother_weight=mother[select_one_layer].weight
+        picked_one_row=shuffle(collect(1:size(mother_weight)[1]))[1]
+        picked_one_col=shuffle(collect(1:size(mother_weight)[2]))[1]
+        if rand() < Crossover_rate
+            nn[select_one_layer].weight[picked_one_row,picked_one_col]=mother_weight[picked_one_row,picked_one_col]
+        end
+    end
+    return nn
+end
+Mutation_rate = 0.01
+#Do mutation here
+function mutation(new_child)
+    nn=deepcopy(new_child)
+    for i in 1:layer
+        select_one_layer = shuffle(collect(1:layer))[1]
+        bias=nn[select_one_layer].bias
+        picked_one_row=shuffle(collect(1:size(bias)[1]))[1]
+        if rand() < Mutation_rate
+            nn[select_one_layer].bias[picked_one_row]+=rand(Uniform(-0.5,0.5),1)[1]
+        end
+    end
+
+    for i in 1:layer
+        select_one_layer=shuffle(collect(1:layer))[1]
+        weight=nn[select_one_layer].weight
+        picked_one_row=shuffle(collect(1:size(weight)[1]))[1]
+        picked_one_col=shuffle(collect(1:size(weight)[2]))[1]
+        if rand() < Mutation_rate
+            nn[select_one_layer].weight[picked_one_row,picked_one_col]+=rand(Uniform(-0.5,0.5),1)[1]
+        end
+    end
+    return nn
+end
+function evaluation(final_list)
+    x = sort(final_list,rev = true)
+    return x 
+end
+#refined version
+global test = []
+global dict = Dict()
+for i in 1:100
+    a = population(100)
+    acc = zeros(100)
+    #dict = Dict()
+    acc_list = []
+    final_list = []
+    for i in 1:100
+        acc[i] = accuracy_each_model(a[i])
+        key = acc[i]
+        value = a[i]
+        push!(dict,key =>value)
+    end
+    x = sort(acc,rev = true)
+    append!(acc_list,x)# save the acc array
+    #remove last 40%
+    for i in 1:60
+        append!(final_list,acc_list[i])
+    end
+    # make the final list become 100 again
+    for i in 1:40
+        x = sort(final_list, rev = true)
+        father = dict[x[1]]
+        mother = dict[x[2]]
+        c1 = crossover(father, mother)
+        mc1 = mutation(c1)
+        append!(final_list,accuracy_each_model(mc1))
+        key = accuracy_each_model(mc1)
+        value = mc1
+        push!(dict,key =>value)
+    end
+    best_model = evaluation(final_list)
+    append!(test,best_model[1])
+    stop = sort(test,rev = true)
+    if accuracy_each_model(dict[stop[1]]) > 0.95
+        break
+    end
+end
+test = sort(test,rev = true)
+sorted_test = sort(test)
+
+function show_accuracy()
+    plot!(1:length(sorted_test), sorted_test, label = "accuracy")
+    plot!(xlabel = "Iteration")
+end
+Confusion_Martix!(dict[test[1]])
